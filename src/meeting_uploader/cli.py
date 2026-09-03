@@ -58,6 +58,35 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_state(args: argparse.Namespace) -> int:
+    """미러 저장소를 clone/pull 하고 파이프라인 상태를 출력한다 (Phase 0/1 진단)."""
+    import os
+
+    from .archive import ArchiveRepo
+
+    repo_url = os.environ.get("ARCHIVE_REPO_URL", "").strip()
+    if not repo_url:
+        raise ConfigError("환경변수 ARCHIVE_REPO_URL 가 설정되지 않았습니다")
+    work_dir = Path(os.environ.get("ARCHIVE_WORK_DIR", ".work/meeting-archive").strip())
+
+    archive = ArchiveRepo(repo_url, work_dir)
+    archive.sync()
+    manifest = archive.load_manifest()
+    by_status: dict[str, int] = {}
+    for entry in manifest.values():
+        by_status[entry.status] = by_status.get(entry.status, 0) + 1
+
+    _print_json(
+        {
+            "work_dir": str(work_dir),
+            "page_token": archive.read_page_token(),
+            "manifest_entries": len(manifest),
+            "by_status": by_status,
+        }
+    )
+    return 0
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     from . import pipeline
     from .notifier import notify_slack
@@ -97,6 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
     sf.add_argument("--file-id", required=True)
     sf.add_argument("--dest", default="./_download")
     sf.set_defaults(func=_cmd_fetch)
+
+    ss = sub.add_parser("state", help="미러 저장소 상태 확인 (Phase 0/1)")
+    ss.set_defaults(func=_cmd_state)
 
     sr = sub.add_parser("run", help="전체 파이프라인 실행")
     sr.add_argument("--dry-run", action="store_true", help="스캔/판정만, 업로드 안 함")

@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.work/
+_download/
+secrets/
+.env
+run-report-*.json
+.pytest_cache/
+.ruff_cache/
+build/
+*.egg-info/

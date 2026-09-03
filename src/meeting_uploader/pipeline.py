@@ -82,7 +82,7 @@ def _planned_action(prior: Entry | None) -> str:
     return "update (revision changed)"
 
 
-def run(cfg: Config, *, since: str | None = None) -> Report:
+def run(cfg: Config, *, since: str | None = None, full_scan: bool = False) -> Report:
     report = Report()
 
     if not cfg.dry_run:
@@ -102,11 +102,12 @@ def run(cfg: Config, *, since: str | None = None) -> Report:
     manifest = archive.load_manifest()
     token = archive.read_page_token()
 
-    if token:
+    if token and not full_scan:
         changed, new_token = drive.list_changes(token)
         log.info("changes.list: %d 건 (증분)", len(changed))
     else:
-        log.warning("저장된 page token 없음 -> 폴더 전체 스캔(백필)")
+        reason = "강제 전체 스캔" if full_scan else "저장된 page token 없음 -> 폴더 전체 스캔(백필)"
+        log.warning(reason)
         changed = drive.list_folder(cfg.gdrive_folder_id)
         new_token = drive.get_start_page_token()
         log.info("폴더 스캔: %d 건", len(changed))
@@ -114,6 +115,7 @@ def run(cfg: Config, *, since: str | None = None) -> Report:
     cutoff = date.fromisoformat(since) if since else None
     fresh_before = datetime.now(UTC) - timedelta(minutes=cfg.min_file_age_minutes)
     download_dir = Path(cfg.archive_work_dir).parent / "_download"
+    deferred = False  # 일시적 사유(최근 수정)로 보류된 파일이 있으면 토큰을 전진시키지 않는다
 
     for f in changed:
         name = f["name"]
@@ -133,7 +135,10 @@ def run(cfg: Config, *, since: str | None = None) -> Report:
 
         modified = datetime.fromisoformat(f["modifiedTime"].replace("Z", "+00:00"))
         if modified > fresh_before:
-            report.skipped.append({"file": name, "reason": "최근 수정 — 다음 회차 처리"})
+            report.skipped.append(
+                {"file": name, "reason": "최근 수정 — 다음 회차 처리", "deferred": True}
+            )
+            deferred = True
             continue
 
         revision = _revision_of(f)
@@ -183,14 +188,19 @@ def run(cfg: Config, *, since: str | None = None) -> Report:
             entry.touch()
             manifest[f["id"]] = entry
 
-    if not cfg.dry_run:
-        archive.write_page_token(new_token)
-        archive.save_manifest(manifest)
-        archive.commit_state()
-        if cfg.archive_push:
-            archive.push()
-    else:
+    if cfg.dry_run:
         log.info("dry-run: 상태(token/manifest)와 커밋은 건드리지 않음")
+        return report
+
+    if deferred:
+        # 보류된 파일이 다음 회차에 다시 조회되도록 토큰을 전진시키지 않는다
+        log.info("보류된 파일이 있어 page token 을 갱신하지 않음 (다음 회차 재검토)")
+    else:
+        archive.write_page_token(new_token)
+    archive.save_manifest(manifest)
+    archive.commit_state()
+    if cfg.archive_push:
+        archive.push()
 
     return report
 

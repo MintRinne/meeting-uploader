@@ -145,12 +145,17 @@ class ArchiveRepo:
 
     def commit_state(self) -> None:
         repo = self._require_repo()
-        repo.index.add([TOKEN_FILE, MANIFEST_FILE])
+        paths = [p for p in (TOKEN_FILE, MANIFEST_FILE) if (self._dir / p).exists()]
+        if not paths:
+            return
+        repo.index.add(paths)
         if repo.is_dirty(index=True, working_tree=False):
             repo.index.commit("chore(state): update drive token and manifest")
 
     def push(self) -> None:
-        self._require_repo().remotes.origin.push()
+        repo = self._require_repo()
+        # 현재 브랜치를 원격에 push (upstream 이 없으면 생성)
+        repo.git.push("origin", "HEAD", set_upstream=True)
 
     def _require_repo(self) -> Repo:
         if self._repo is None:

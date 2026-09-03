@@ -232,6 +232,33 @@ def test_real_run_fans_out_and_updates_state(tmp_path, wire):
     assert entry.groupware_post_id == "p-1"
 
 
+def test_fresh_file_defers_and_does_not_advance_token(tmp_path, wire):
+    name = "2026-09-03_주간회의.docx"
+    _drive, archive, _gw = wire([_file(name, minutes_old=1)])  # 10분 미만
+    cfg = _cfg(
+        tmp_path,
+        dry_run=False,
+        groupware_base_url="https://gw",
+        groupware_api_token="t",
+        groupware_board_id="1",
+    )
+    report = pipeline.run(cfg)
+
+    assert report.as_dict()["counts"]["processed"] == 0
+    assert any(s.get("deferred") for s in report.skipped)
+    assert archive.token is None  # 토큰을 전진시키지 않음 -> 다음 회차에 재검토
+    assert archive.saved_manifest == {}
+
+
+def test_full_scan_ignores_existing_cursor(tmp_path, wire):
+    name = "2026-09-03_주간회의.docx"
+    _drive, archive, _gw = wire([_file(name)])
+    archive.token = "EXISTING-CURSOR"  # 커서가 있어도
+    report = pipeline.run(_cfg(tmp_path, dry_run=True), full_scan=True)
+    # list_changes 가 아니라 list_folder 를 써야 함 (FakeDrive.list_changes 는 AssertionError)
+    assert report.as_dict()["counts"]["planned"] == 1
+
+
 def test_partial_failure_keeps_git_done(tmp_path, wire):
     name = "2026-09-03_주간회의.docx"
 

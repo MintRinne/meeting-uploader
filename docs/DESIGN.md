@@ -113,7 +113,9 @@ fan-out 부분 실패 시맨틱:
 ## 9. 리스크 & 주의점
 
 1. **부분 실패가 정상 상황** — fan-out 한쪽만 성공은 늘 발생. manifest 상태 추적 + UNSTABLE + 자동 재시도가 Phase 1 필수.
-2. **자정 저장 중 파일** — `modifiedTime` 이 최근 N분이면 이번 회차 skip.
+2. **자정 저장 중 파일** — `modifiedTime` 이 최근 N분이면 이번 회차 보류(deferred).
+   보류된 파일이 있으면 `drive_page_token` 을 전진시키지 않아 다음 회차에 다시 조회된다.
+   커서가 꼬였을 때 복구는 `run --full-scan`.
 3. **최초 실행 백필 폭탄** — `changes.getStartPageToken` 으로 시작점 잡고 과거분은 `--since` 커트오프.
 4. **서비스 계정 + My Drive 불가** — 반드시 Shared Drive.
 5. **미러 저장소 비대화** — 대용량 첨부는 Git LFS 검토.

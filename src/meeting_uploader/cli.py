@@ -95,7 +95,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if args.dry_run:
         cfg = dataclasses.replace(cfg, dry_run=True)
 
-    report = pipeline.run(cfg, since=args.since)
+    report = pipeline.run(cfg, since=args.since, full_scan=args.full_scan)
     data = report.as_dict()
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -136,6 +136,11 @@ def build_parser() -> argparse.ArgumentParser:
     sr = sub.add_parser("run", help="전체 파이프라인 실행")
     sr.add_argument("--dry-run", action="store_true", help="스캔/판정만, 업로드 안 함")
     sr.add_argument("--since", metavar="YYYY-MM-DD", help="이 날짜 이전 회의록 무시")
+    sr.add_argument(
+        "--full-scan",
+        action="store_true",
+        help="저장된 커서를 무시하고 폴더 전체를 다시 스캔 (복구용)",
+    )
     sr.set_defaults(func=_cmd_run)
     return p
 

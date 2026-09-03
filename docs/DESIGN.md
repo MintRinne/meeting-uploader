@@ -38,7 +38,7 @@ Jenkins Pipeline · Windows · cron 0 0 * * * (KST)
 `meeting-archive` 레이아웃:
 
 ```
-minutes/2026/09/2026-09-03_주간개발회의_김철수.docx
+minutes/2026/09/2026-09-03_주간개발회의.docx
 state/
   drive_page_token          # 다음 changes.list 시작 커서
   manifest.json             # fileId -> {revision, git_path, committed_at,
@@ -46,18 +46,20 @@ state/
 README.md
 ```
 
-커밋 메시지: `chore(minutes): add minutes/2026/09/2026-09-03_주간개발회의_김철수.docx`
+커밋 메시지: `chore(minutes): add minutes/2026/09/2026-09-03_주간개발회의.docx` (작성자: 홍길동)
 
 ## 4. 명명 규칙 (작성자 공지)
 
 ```
-YYYY-MM-DD_회의명_작성자.(docx|hwp)
-예) 2026-09-03_주간개발회의_김철수.docx
+YYYY-MM-DD_제목[.docx|.hwp]
+예) 2026-09-03_주간개발회의.docx
+    2026-09-03_스프린트 회고          (확장자 없는 Google Docs 네이티브)
 ```
 
 - 회의 날짜 = 파일명 접두사 (Drive `createdTime`·폴더 경로는 보조 검증용)
-- 회의명에는 밑줄 허용, 작성자에는 불가 (마지막 밑줄 기준 분리)
-- 규칙 위반 파일은 배포하지 않고 리포트에 `SKIPPED` + 알림
+- 제목에는 밑줄·공백 허용
+- **작성자는 파일명이 아니라 Drive `lastModifyingUser`(최종 수정자)에서 채운다**
+- 규칙 위반 파일(구 `N차_멘토링_회의록_YYMMDD.docx` 등)은 배포하지 않고 `SKIPPED` + 알림
 - 네이티브 Google Docs 는 `files.export` 로 `.docx` 변환 후 동일 처리
   (Phase 5 에서 `.md` 변환 추가 → git diff 로 내용 변경 추적)
 

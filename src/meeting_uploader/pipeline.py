@@ -25,7 +25,7 @@ fan-out 부분 실패
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -38,7 +38,7 @@ from .archive import (
     Entry,
 )
 from .config import Config
-from .drive import DriveClient
+from .drive import DriveClient, author_of
 from .groupware import GroupwareClient, build_post_body
 from .parser import FileNameError, MeetingDoc, parse_filename
 
@@ -125,6 +125,8 @@ def run(cfg: Config, *, since: str | None = None) -> Report:
             report.skipped.append({"file": name, "reason": str(e)})
             continue
 
+        doc = replace(doc, author=author_of(f) or doc.author)
+
         if cutoff and doc.meeting_date < cutoff:
             report.skipped.append({"file": name, "reason": f"cutoff {cutoff} 이전"})
             continue
@@ -207,7 +209,9 @@ def _process_one(
     # 1) Git 미러 (미완료분만)
     if entry.status in (STATUS_PENDING, STATUS_FAILED):
         rel = doc.archive_path()
-        archive.add_document(local, rel)
+        archive.add_document(
+            local, rel, message=f"chore(minutes): {doc.post_title} ({doc.author})"
+        )
         entry.git_path = rel
         entry.committed_at = datetime.now(UTC).isoformat()
         entry.status = STATUS_GIT_DONE

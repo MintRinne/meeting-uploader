@@ -35,7 +35,7 @@ copy .env.example .env        # 값 채우기
 
 ```bash
 # 파일명 파싱 확인 (자격증명 불필요)
-python -m meeting_uploader parse 2026-09-03_주간개발회의_김철수.docx
+python -m meeting_uploader parse 2026-09-03_주간개발회의.docx
 
 # Phase 0: Drive 파일 1건 다운로드 (GDRIVE_SA_KEY_PATH 만 필요)
 python -m meeting_uploader fetch --file-id <DRIVE_FILE_ID> --dest ./_download

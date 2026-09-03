@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
+import stat
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +19,16 @@ from pathlib import Path
 from git import Repo
 
 log = logging.getLogger(__name__)
+
+
+def _force_rmtree(path: Path) -> None:
+    """Windows 에서 .git 팩파일 등 읽기전용 파일까지 지운다."""
+
+    def _on_error(func, target, _exc):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    shutil.rmtree(path, onexc=_on_error)
 
 TOKEN_FILE = "state/drive_page_token"
 MANIFEST_FILE = "state/manifest.json"
@@ -59,23 +71,39 @@ class ArchiveRepo:
         """미러를 원격의 최신 상태로 맞춘다.
 
         미러는 우리가 전적으로 관리하는 대상이므로, 로컬 변경을 보존하려 애쓰지 않고
-        원격 기준으로 강제 동기화한다 (fetch + reset --hard). 기존 클론이 손상됐거나
-        추적 브랜치가 없으면 통째로 다시 클론한다.
+        원격 기준으로 강제 동기화한다 (fetch + reset --hard). 커밋이 없는 빈 저장소는
+        그대로 재사용하고, 기존 클론이 손상됐으면 통째로 다시 클론한다.
         """
-        if (self._dir / ".git").exists():
-            try:
-                repo = Repo(self._dir)
-                repo.remotes.origin.fetch(prune=True)
-                repo.git.reset("--hard", "@{u}")  # 현재 브랜치의 upstream 으로
-                repo.git.clean("-ffd")
-                self._repo = repo
-                return
-            except Exception:
-                log.warning("기존 미러 재동기화 실패 -> 새로 clone", exc_info=True)
-                shutil.rmtree(self._dir, ignore_errors=True)
-
+        if (self._dir / ".git").exists() and self._refresh():
+            return
+        if self._dir.exists():
+            _force_rmtree(self._dir)
         self._dir.parent.mkdir(parents=True, exist_ok=True)
         self._repo = Repo.clone_from(self._url, self._dir)
+
+    def _refresh(self) -> bool:
+        try:
+            repo = Repo(self._dir)
+            repo.remotes.origin.fetch(prune=True)
+        except Exception:
+            log.warning("기존 미러 fetch 실패 -> 새로 clone", exc_info=True)
+            return False
+
+        try:
+            tracking = repo.active_branch.tracking_branch()
+        except (TypeError, ValueError):  # detached / unborn (빈 저장소)
+            tracking = None
+
+        if tracking is not None:
+            try:
+                repo.git.reset("--hard", tracking.name)
+                repo.git.clean("-ffd")
+            except Exception:
+                log.warning("기존 미러 reset 실패 -> 새로 clone", exc_info=True)
+                return False
+
+        self._repo = repo
+        return True
 
     # --- 상태 파일 I/O ------------------------------------------------
     def read_page_token(self) -> str | None:
@@ -105,14 +133,14 @@ class ArchiveRepo:
         )
 
     # --- 커밋 --------------------------------------------------------
-    def add_document(self, src: Path, rel_path: str) -> str:
+    def add_document(self, src: Path, rel_path: str, *, message: str | None = None) -> str:
         """파일을 미러에 복사하고 커밋. 커밋 SHA 반환."""
         dest = self._dir / rel_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(src.read_bytes())
         repo = self._require_repo()
         repo.index.add([rel_path])
-        commit = repo.index.commit(f"chore(minutes): add {rel_path}")
+        commit = repo.index.commit(message or f"chore(minutes): add {rel_path}")
         return commit.hexsha
 
     def commit_state(self) -> None:

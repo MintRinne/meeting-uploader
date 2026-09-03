@@ -70,7 +70,7 @@ class FakeArchive:
     def push(self):
         self.pushed = True
 
-    def add_document(self, src, rel_path):  # noqa: ARG002
+    def add_document(self, src, rel_path, *, message=None):  # noqa: ARG002
         self.added.append(rel_path)
         return "deadbeef"
 
@@ -78,12 +78,14 @@ class FakeArchive:
 class FakeGroupware:
     def __init__(self):
         self.created: list[str] = []
+        self.bodies: list[str] = []
 
     def find_post(self, title):  # noqa: ARG002
         return None
 
     def create_post(self, *, title, body_html, attachment):  # noqa: ARG002
         self.created.append(title)
+        self.bodies.append(body_html)
         return PostResult(post_id="p-1", url="https://gw/p-1")
 
 
@@ -106,7 +108,7 @@ def _cfg(tmp_path: Path, **over) -> Config:
     return Config(**base)
 
 
-def _file(name: str, *, minutes_old: int = 60, rev: str = "r1") -> dict:
+def _file(name: str, *, minutes_old: int = 60, rev: str = "r1", author: str = "김철수") -> dict:
     mtime = (datetime.now(UTC) - timedelta(minutes=minutes_old)).strftime(
         "%Y-%m-%dT%H:%M:%S.000Z"
     )
@@ -116,6 +118,7 @@ def _file(name: str, *, minutes_old: int = 60, rev: str = "r1") -> dict:
         "mimeType": "application/octet-stream",
         "modifiedTime": mtime,
         "headRevisionId": rev,
+        "lastModifyingUser": {"displayName": author},
     }
 
 
@@ -139,19 +142,24 @@ def wire(monkeypatch):
 def test_dry_run_selects_only_valid_files(tmp_path, wire):
     drive, archive, _ = wire(
         [
-            _file("2026-09-03_주간회의_김철수.docx"),
+            _file("2026-09-03_주간회의.docx"),
             _file("엉망진창이름.txt"),
-            _file("2026-09-03_긴급회의_이영희.docx", minutes_old=1),  # 너무 최근
+            _file("6차_멘토링_회의록_260902.docx"),  # 구 명명 규칙
+            _file("2026-09-03_긴급회의.docx", minutes_old=1),  # 너무 최근
         ]
     )
     report = pipeline.run(_cfg(tmp_path, dry_run=True))
     data = report.as_dict()
 
     assert data["counts"]["planned"] == 1
-    assert report.planned[0]["file"] == "2026-09-03_주간회의_김철수.docx"
+    assert report.planned[0]["file"] == "2026-09-03_주간회의.docx"
+    assert report.planned[0]["author"] == "김철수"
+    assert report.planned[0]["post_title"] == "[회의록] 2026-09-03 주간회의"
+
     reasons = {s["file"]: s["reason"] for s in report.skipped}
     assert "엉망진창이름.txt" in reasons
-    assert "최근 수정" in reasons["2026-09-03_긴급회의_이영희.docx"]
+    assert "6차_멘토링_회의록_260902.docx" in reasons
+    assert "최근 수정" in reasons["2026-09-03_긴급회의.docx"]
 
     # dry-run 은 상태를 건드리지 않는다
     assert archive.committed is False
@@ -162,16 +170,16 @@ def test_dry_run_selects_only_valid_files(tmp_path, wire):
 def test_since_cutoff(tmp_path, wire):
     wire(
         [
-            _file("2026-08-01_옛날회의_김철수.docx"),
-            _file("2026-09-03_최근회의_김철수.docx"),
+            _file("2026-08-01_옛날회의.docx"),
+            _file("2026-09-03_최근회의.docx"),
         ]
     )
     report = pipeline.run(_cfg(tmp_path, dry_run=True), since="2026-09-01")
-    assert [p["file"] for p in report.planned] == ["2026-09-03_최근회의_김철수.docx"]
+    assert [p["file"] for p in report.planned] == ["2026-09-03_최근회의.docx"]
 
 
 def test_already_done_same_revision_skipped(tmp_path, wire):
-    name = "2026-09-03_주간회의_김철수.docx"
+    name = "2026-09-03_주간회의.docx"
     manifest = {
         f"id::{name}": Entry(
             file_id=f"id::{name}", revision="r1", filename=name, status=STATUS_DONE
@@ -184,7 +192,7 @@ def test_already_done_same_revision_skipped(tmp_path, wire):
 
 
 def test_revision_change_replans(tmp_path, wire):
-    name = "2026-09-03_주간회의_김철수.docx"
+    name = "2026-09-03_주간회의.docx"
     manifest = {
         f"id::{name}": Entry(
             file_id=f"id::{name}", revision="OLD", filename=name, status=STATUS_DONE
@@ -202,8 +210,8 @@ def test_real_run_requires_groupware(tmp_path, wire):
 
 
 def test_real_run_fans_out_and_updates_state(tmp_path, wire):
-    name = "2026-09-03_주간회의_김철수.docx"
-    drive, archive, gw = wire([_file(name)])
+    name = "2026-09-03_주간회의.docx"
+    drive, archive, gw = wire([_file(name, author="이영희")])
     cfg = _cfg(
         tmp_path,
         dry_run=False,
@@ -214,8 +222,9 @@ def test_real_run_fans_out_and_updates_state(tmp_path, wire):
     report = pipeline.run(cfg)
 
     assert report.as_dict()["counts"]["processed"] == 1
-    assert archive.added == ["minutes/2026/09/2026-09-03_주간회의_김철수.docx"]
+    assert archive.added == ["minutes/2026/09/2026-09-03_주간회의.docx"]
     assert gw.created == ["[회의록] 2026-09-03 주간회의"]
+    assert "이영희" in gw.bodies[0]  # 작성자는 Drive 최종 수정자에서
     assert archive.token == "TOKEN-NEXT"
     assert archive.committed is True
     entry = archive.saved_manifest[f"id::{name}"]
@@ -224,7 +233,7 @@ def test_real_run_fans_out_and_updates_state(tmp_path, wire):
 
 
 def test_partial_failure_keeps_git_done(tmp_path, wire):
-    name = "2026-09-03_주간회의_김철수.docx"
+    name = "2026-09-03_주간회의.docx"
 
     class FlakyGroupware(FakeGroupware):
         def create_post(self, **kwargs):
@@ -241,7 +250,7 @@ def test_partial_failure_keeps_git_done(tmp_path, wire):
     report = pipeline.run(cfg)
 
     assert report.as_dict()["counts"]["failed"] == 1
-    assert archive.added == ["minutes/2026/09/2026-09-03_주간회의_김철수.docx"]  # git 은 됨
+    assert archive.added == ["minutes/2026/09/2026-09-03_주간회의.docx"]  # git 은 됨
     entry = archive.saved_manifest[f"id::{name}"]
     assert entry.status == STATUS_GIT_DONE  # 다음 회차에 그룹웨어만 재시도
     assert "그룹웨어 500" in entry.error

@@ -30,8 +30,15 @@ _EXPORT_MIME = {
 }
 
 _FILE_FIELDS = (
-    "id,name,mimeType,md5Checksum,modifiedTime,trashed,parents,headRevisionId"
+    "id,name,mimeType,md5Checksum,modifiedTime,trashed,parents,headRevisionId,"
+    "lastModifyingUser(displayName,emailAddress)"
 )
+
+
+def author_of(f: dict) -> str:
+    """Drive 파일 메타데이터에서 최종 수정자 이름을 뽑는다."""
+    user = f.get("lastModifyingUser") or {}
+    return user.get("displayName") or user.get("emailAddress") or ""
 
 
 class DriveClient:

@@ -8,11 +8,15 @@
 from __future__ import annotations
 
 import json
+import logging
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from git import Repo
+
+log = logging.getLogger(__name__)
 
 TOKEN_FILE = "state/drive_page_token"
 MANIFEST_FILE = "state/manifest.json"
@@ -52,13 +56,26 @@ class ArchiveRepo:
         return self._dir
 
     def sync(self) -> None:
+        """미러를 원격의 최신 상태로 맞춘다.
+
+        미러는 우리가 전적으로 관리하는 대상이므로, 로컬 변경을 보존하려 애쓰지 않고
+        원격 기준으로 강제 동기화한다 (fetch + reset --hard). 기존 클론이 손상됐거나
+        추적 브랜치가 없으면 통째로 다시 클론한다.
+        """
         if (self._dir / ".git").exists():
-            repo = Repo(self._dir)
-            repo.remotes.origin.pull()
-        else:
-            self._dir.parent.mkdir(parents=True, exist_ok=True)
-            repo = Repo.clone_from(self._url, self._dir)
-        self._repo = repo
+            try:
+                repo = Repo(self._dir)
+                repo.remotes.origin.fetch(prune=True)
+                repo.git.reset("--hard", "@{u}")  # 현재 브랜치의 upstream 으로
+                repo.git.clean("-ffd")
+                self._repo = repo
+                return
+            except Exception:
+                log.warning("기존 미러 재동기화 실패 -> 새로 clone", exc_info=True)
+                shutil.rmtree(self._dir, ignore_errors=True)
+
+        self._dir.parent.mkdir(parents=True, exist_ok=True)
+        self._repo = Repo.clone_from(self._url, self._dir)
 
     # --- 상태 파일 I/O ------------------------------------------------
     def read_page_token(self) -> str | None:

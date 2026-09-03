@@ -51,6 +51,19 @@ python -m meeting_uploader run --dry-run --since 2026-09-01
 python -m meeting_uploader run
 ```
 
+### 전체 파이프라인을 로컬에서 끝까지 (가짜 그룹웨어)
+
+실제 사내 API 스펙을 받기 전까지는 `tools/mock_groupware.py` 로 검증한다.
+자세한 확인 항목은 [docs/GROUPWARE_API.md](docs/GROUPWARE_API.md).
+
+```bash
+# 터미널 1 — 가짜 그룹웨어
+.venv\Scripts\python tools\mock_groupware.py --port 8080
+
+# 터미널 2 — .env 의 GROUPWARE_BASE_URL=http://127.0.0.1:8080 확인 후
+.venv\Scripts\python -m meeting_uploader run
+```
+
 ## 진행 단계
 
 - [x] **Phase 0** — 스캐폴딩, 파일명 파서, Drive 단건 다운로드, 미러 저장소 연동

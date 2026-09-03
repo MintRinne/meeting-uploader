@@ -105,10 +105,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     _print_json(data)
 
     c = data["counts"]
-    summary = (
-        f"회의록 파이프라인: 업로드 {c['uploaded']} / "
-        f"건너뜀 {c['skipped']} / 실패 {c['failed']}"
-    )
+    if cfg.dry_run:
+        summary = f"[dry-run] 예정 {c['planned']} / 건너뜀 {c['skipped']}"
+    else:
+        summary = (
+            f"회의록 파이프라인: 처리 {c['processed']} / "
+            f"건너뜀 {c['skipped']} / 실패 {c['failed']}"
+        )
     notify_slack(cfg.slack_webhook_url, summary)
 
     return 1 if data["failed"] else 0

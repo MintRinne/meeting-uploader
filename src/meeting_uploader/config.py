@@ -38,17 +38,17 @@ def _optional(name: str, default: str = "") -> str:
 
 @dataclass(frozen=True)
 class Config:
-    # Google Drive
+    # Google Drive (항상 필요)
     gdrive_sa_key_path: Path
     gdrive_folder_id: str
-    # 그룹웨어
-    groupware_base_url: str
-    groupware_api_token: str
-    groupware_board_id: str
-    # Git 미러 저장소
+    # Git 미러 저장소 (항상 필요)
     archive_repo_url: str
     archive_work_dir: Path
     archive_push: bool
+    # 그룹웨어 (실제 업로드 시에만 필요 — dry-run 에서는 비어 있어도 됨)
+    groupware_base_url: str
+    groupware_api_token: str
+    groupware_board_id: str
     # 동작 옵션
     dry_run: bool
     min_file_age_minutes: int
@@ -59,13 +59,27 @@ class Config:
         return cls(
             gdrive_sa_key_path=Path(_require("GDRIVE_SA_KEY_PATH")),
             gdrive_folder_id=_require("GDRIVE_FOLDER_ID"),
-            groupware_base_url=_require("GROUPWARE_BASE_URL").rstrip("/"),
-            groupware_api_token=_require("GROUPWARE_API_TOKEN"),
-            groupware_board_id=_require("GROUPWARE_BOARD_ID"),
             archive_repo_url=_require("ARCHIVE_REPO_URL"),
             archive_work_dir=Path(_optional("ARCHIVE_WORK_DIR", ".work/meeting-archive")),
             archive_push=_optional("ARCHIVE_PUSH", "true").lower() in _TRUTHY,
+            groupware_base_url=_optional("GROUPWARE_BASE_URL").rstrip("/"),
+            groupware_api_token=_optional("GROUPWARE_API_TOKEN"),
+            groupware_board_id=_optional("GROUPWARE_BOARD_ID"),
             dry_run=_optional("DRY_RUN", "false").lower() in _TRUTHY,
             min_file_age_minutes=int(_optional("MIN_FILE_AGE_MINUTES", "10")),
             slack_webhook_url=_optional("SLACK_WEBHOOK_URL"),
         )
+
+    def require_groupware(self) -> None:
+        """실제 업로드 직전 호출. 그룹웨어 설정이 없으면 ConfigError."""
+        missing = [
+            name
+            for name, value in (
+                ("GROUPWARE_BASE_URL", self.groupware_base_url),
+                ("GROUPWARE_API_TOKEN", self.groupware_api_token),
+                ("GROUPWARE_BOARD_ID", self.groupware_board_id),
+            )
+            if not value
+        ]
+        if missing:
+            raise ConfigError(f"그룹웨어 설정 누락: {', '.join(missing)}")

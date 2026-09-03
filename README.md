@@ -37,25 +37,30 @@ copy .env.example .env        # 값 채우기
 # 파일명 파싱 확인 (자격증명 불필요)
 python -m meeting_uploader parse 2026-09-03_주간개발회의_김철수.docx
 
-# Phase 0: Drive 파일 1건 다운로드
+# Phase 0: Drive 파일 1건 다운로드 (GDRIVE_SA_KEY_PATH 만 필요)
 python -m meeting_uploader fetch --file-id <DRIVE_FILE_ID> --dest ./_download
 
-# 전체 파이프라인
+# 미러 저장소 상태 확인 (ARCHIVE_REPO_URL 만 필요)
+python -m meeting_uploader state
+
+# 파이프라인 dry-run — Drive + 미러 저장소만으로 "무엇을 올릴지" 확인 (그룹웨어 불필요)
 python -m meeting_uploader run --dry-run
-python -m meeting_uploader run --since 2026-09-01
+python -m meeting_uploader run --dry-run --since 2026-09-01
+
+# 실제 실행 (그룹웨어 설정 필요)
+python -m meeting_uploader run
 ```
 
 ## 진행 단계
 
-- [x] **Phase 0** — 스캐폴딩, 파일명 파서, Drive 단건 다운로드, 클라이언트 골격
-- [ ] **Phase 1** — `changes` 커서 + manifest + dry-run + fan-out 부분실패 처리 (로컬 수동)
+- [x] **Phase 0** — 스캐폴딩, 파일명 파서, Drive 단건 다운로드, 미러 저장소 연동
+- [x] **Phase 1** — `changes` 커서 + manifest + dry-run + fan-out 부분실패 처리 (로컬 수동)
 - [ ] **Phase 2** — Jenkins Freestyle job, cron 00:00
 - [ ] **Phase 3** — Jenkinsfile, 시크릿 3개, 스테이지 분리
 - [ ] **Phase 4** — pytest/ruff 게이트, Slack 알림, 리포트 아티팩트, UNSTABLE
 - [ ] **Phase 5** — Drive Push Notification 준실시간, Google Docs → Markdown 커밋
 
-## Phase 0 남은 과제
+## 남은 과제 (Phase 2 이전)
 
-1. GCP 서비스 계정 + Drive API 활성화, Shared Drive 에 뷰어로 추가
-2. `meeting-archive` 저장소 생성 + Deploy key
-3. **그룹웨어 API 문서 확보** → `groupware.py` 의 엔드포인트/스키마 확정 (`⚠️` 주석 위치)
+- **그룹웨어 API 문서 확보** → `groupware.py` 의 엔드포인트/스키마 확정 (`⚠️` 주석 위치).
+  이게 있어야 `run` (dry-run 아닌) 이 동작.

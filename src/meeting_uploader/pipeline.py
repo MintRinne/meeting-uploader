@@ -2,14 +2,20 @@
 
 흐름
     1. 미러 저장소 clone/pull -> 상태(token, manifest) 로드
-    2. token 이 있으면 Drive changes.list, 없으면 폴더 전체 스캔(백필)
+    2. token 이 있으면 Drive changes.list(증분), 없으면 폴더 전체 스캔(백필)
     3. 파일별로:
         - 파일명 파싱 (실패 -> SKIPPED)
         - cutoff / 최근수정 필터 (-> SKIPPED)
-        - manifest 대조 (이미 done -> SKIPPED)
-        - 다운로드 -> Git 미러 커밋(미완료분) -> 그룹웨어 등록(미완료분)
+        - manifest 대조 (이미 done + 같은 revision -> SKIPPED)
+        - (dry-run) 예정 동작만 기록
+        - (실제)  다운로드 -> Git 미러 커밋(미완료분) -> 그룹웨어 등록(미완료분)
     4. token / manifest 갱신 커밋 & push
     5. 리포트 반환
+
+멱등성 3단 방어
+    1) Drive startPageToken  : 지난 실행 이후 변경분만
+    2) manifest.json         : 파일별 git / groupware 완료 여부
+    3) groupware.find_post   : 업로드 직전 동일 제목 게시글 확인
 
 fan-out 부분 실패
     Git 성공 / 그룹웨어 실패 -> status=git_done, 다음 회차에 그룹웨어만 재시도.
@@ -34,14 +40,15 @@ from .archive import (
 from .config import Config
 from .drive import DriveClient
 from .groupware import GroupwareClient, build_post_body
-from .parser import FileNameError, parse_filename
+from .parser import FileNameError, MeetingDoc, parse_filename
 
 log = logging.getLogger(__name__)
 
 
 @dataclass
 class Report:
-    uploaded: list[dict] = field(default_factory=list)
+    processed: list[dict] = field(default_factory=list)  # 실제 업로드 완료/부분완료
+    planned: list[dict] = field(default_factory=list)  # dry-run 예정
     skipped: list[dict] = field(default_factory=list)
     failed: list[dict] = field(default_factory=list)
 
@@ -49,24 +56,47 @@ class Report:
         return {
             "generated_at": datetime.now(UTC).isoformat(),
             "counts": {
-                "uploaded": len(self.uploaded),
+                "processed": len(self.processed),
+                "planned": len(self.planned),
                 "skipped": len(self.skipped),
                 "failed": len(self.failed),
             },
-            "uploaded": self.uploaded,
+            "processed": self.processed,
+            "planned": self.planned,
             "skipped": self.skipped,
             "failed": self.failed,
         }
 
 
+def _revision_of(f: dict) -> str:
+    return f.get("headRevisionId") or f.get("md5Checksum") or f["modifiedTime"]
+
+
+def _planned_action(prior: Entry | None) -> str:
+    if prior is None:
+        return "create (git + groupware)"
+    if prior.status == STATUS_GIT_DONE:
+        return "resume (groupware only)"
+    if prior.status == STATUS_FAILED:
+        return "retry"
+    return "update (revision changed)"
+
+
 def run(cfg: Config, *, since: str | None = None) -> Report:
     report = Report()
+
+    if not cfg.dry_run:
+        cfg.require_groupware()
 
     drive = DriveClient(cfg.gdrive_sa_key_path)
     archive = ArchiveRepo(cfg.archive_repo_url, cfg.archive_work_dir)
     archive.sync()
-    groupware = GroupwareClient(
-        cfg.groupware_base_url, cfg.groupware_api_token, cfg.groupware_board_id
+    groupware = (
+        None
+        if cfg.dry_run
+        else GroupwareClient(
+            cfg.groupware_base_url, cfg.groupware_api_token, cfg.groupware_board_id
+        )
     )
 
     manifest = archive.load_manifest()
@@ -74,7 +104,7 @@ def run(cfg: Config, *, since: str | None = None) -> Report:
 
     if token:
         changed, new_token = drive.list_changes(token)
-        log.info("changes.list: %d 건", len(changed))
+        log.info("changes.list: %d 건 (증분)", len(changed))
     else:
         log.warning("저장된 page token 없음 -> 폴더 전체 스캔(백필)")
         changed = drive.list_folder(cfg.gdrive_folder_id)
@@ -104,31 +134,33 @@ def run(cfg: Config, *, since: str | None = None) -> Report:
             report.skipped.append({"file": name, "reason": "최근 수정 — 다음 회차 처리"})
             continue
 
-        revision = f.get("headRevisionId") or f.get("md5Checksum") or f["modifiedTime"]
-        entry = manifest.get(
-            f["id"], Entry(file_id=f["id"], revision=revision, filename=name)
-        )
-        if entry.status == STATUS_DONE and entry.revision == revision:
+        revision = _revision_of(f)
+        prior = manifest.get(f["id"])
+        if prior and prior.status == STATUS_DONE and prior.revision == revision:
             report.skipped.append({"file": name, "reason": "이미 처리됨"})
             continue
 
-        entry.revision = revision
-        entry.filename = name
-
         if cfg.dry_run:
-            report.uploaded.append(
+            report.planned.append(
                 {
                     "file": name,
-                    "dry_run": True,
+                    "meeting_date": doc.meeting_date.isoformat(),
+                    "title": doc.title,
+                    "author": doc.author,
+                    "revision": revision[:12],
+                    "action": _planned_action(prior),
                     "post_title": doc.post_title,
                     "archive_path": doc.archive_path(),
                 }
             )
             continue
 
+        entry = prior or Entry(file_id=f["id"], revision=revision, filename=name)
+        entry.revision = revision
+        entry.filename = name
         try:
             _process_one(f, doc, entry, drive, archive, groupware, download_dir)
-            report.uploaded.append(
+            report.processed.append(
                 {
                     "file": name,
                     "status": entry.status,
@@ -138,9 +170,13 @@ def run(cfg: Config, *, since: str | None = None) -> Report:
             )
         except Exception as e:  # noqa: BLE001 - 파일 단위 격리
             log.exception("처리 실패: %s", name)
-            entry.status = STATUS_FAILED
             entry.error = str(e)
-            report.failed.append({"file": name, "error": str(e)})
+            # 이미 진척된 단계(git_done)는 유지 -> 다음 회차에 그룹웨어만 재시도
+            if entry.status not in (STATUS_GIT_DONE, STATUS_DONE):
+                entry.status = STATUS_FAILED
+            report.failed.append(
+                {"file": name, "status": entry.status, "error": str(e)}
+            )
         finally:
             entry.touch()
             manifest[f["id"]] = entry
@@ -151,13 +187,15 @@ def run(cfg: Config, *, since: str | None = None) -> Report:
         archive.commit_state()
         if cfg.archive_push:
             archive.push()
+    else:
+        log.info("dry-run: 상태(token/manifest)와 커밋은 건드리지 않음")
 
     return report
 
 
 def _process_one(
     f: dict,
-    doc,
+    doc: MeetingDoc,
     entry: Entry,
     drive: DriveClient,
     archive: ArchiveRepo,

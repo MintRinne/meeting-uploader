@@ -43,10 +43,15 @@ def _cmd_parse(args: argparse.Namespace) -> int:
 
 
 def _cmd_fetch(args: argparse.Namespace) -> int:
+    """Phase 0 진단 도구: Drive 자격증명만으로 파일 1건을 받아본다."""
+    import os
+
     from .drive import DriveClient
 
-    cfg = Config.from_env()
-    client = DriveClient(cfg.gdrive_sa_key_path)
+    key_path = os.environ.get("GDRIVE_SA_KEY_PATH", "").strip()
+    if not key_path:
+        raise ConfigError("환경변수 GDRIVE_SA_KEY_PATH 가 설정되지 않았습니다")
+    client = DriveClient(Path(key_path))
     meta = client.get_file(args.file_id)
     out = client.download(meta, Path(args.dest))
     _print_json({"downloaded": str(out), "name": meta["name"], "mimeType": meta["mimeType"]})

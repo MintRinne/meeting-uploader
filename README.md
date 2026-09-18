@@ -1,5 +1,6 @@
 # meeting-uploader
-<<<<<<< HEAD
+
+jenkins ci/cd 구글드라이브 - 회의록 자동 받아오기
 
 회의록 자동 배포 파이프라인.
 
@@ -78,6 +79,3 @@ python -m meeting_uploader run
 
 - **그룹웨어 API 문서 확보** → `groupware.py` 의 엔드포인트/스키마 확정 (`⚠️` 주석 위치).
   이게 있어야 `run` (dry-run 아닌) 이 동작.
-=======
-jenkins ci/cd 구글드라이브- 회의록 자동 받아오기
->>>>>>> 5049ea5216f95a5a99879ae31aee1c958bcd4a76
